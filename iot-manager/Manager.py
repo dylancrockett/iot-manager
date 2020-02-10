@@ -8,12 +8,16 @@ from concurrent.futures import ThreadPoolExecutor
 
 # module imports
 from .Client import Client
+from .Packet import Packet
+from .Message import Message
+from .Device import Device
 
 
 # Manager class
 class Manager:
-    def __init__(self, valid_types, ssl_context=None, host="127.0.0.1", connection_port=8595, max_workers=8,
-                 heartbeat_rate=60, backlogged_connections=10, logging_id="[Manager]", logging_level=logging.INFO):
+    def __init__(self, ssl_context: ssl.SSLContext = None, host: str = "127.0.0.1", connection_port: int = 8595,
+                 max_workers: int = 8, heartbeat_rate: int = 60, backlogged_connections: int = 10,
+                 logging_id: str = "[Manager]", logging_level: int = logging.INFO):
 
         # <> Instantiate Public Class Variables <>
         # the host is the computer running this program
@@ -32,14 +36,8 @@ class Manager:
         # a pool of connected clients
         self.__client_pool = []
 
-        # ensure valid_types is a list
-        if isinstance(valid_types, list):
-            # valid types for the client to say it is
-            self.__valid_types = valid_types
-
-        # raise an error if invalid type
-        else:
-            raise TypeError("valid_types must be of type list")
+        # a list of device types
+        self.__device_types = {}
 
         # logger object and setup
         if isinstance(logging_id, str):
@@ -119,13 +117,6 @@ class Manager:
             # set __ssl_enabled as true
             self.__ssl_enabled = True
 
-        # <> Device Specific Handler Dicts <>
-        # handlers for on_connect events for specific devices
-        self.__on_connect_handlers = {}
-
-        # handlers for on_message events for specific devices
-        self.__on_message_handlers = {}
-
         # <> Threading Setup and Initialization <>
         # a ThreadPoolExecutor which will be used when the manager needs to create temporary threads
         self.__executor = ThreadPoolExecutor(max_workers=max_workers)
@@ -158,11 +149,11 @@ class Manager:
                                   + str(exception))
 
     # takes a client socket and address and awaits the data which identifies the client's type
-    def __register_client(self, connection, address):
+    def __register_client(self, connection: socket, address: tuple):
         # try to create the client while checking for errors
         try:
             # create the client object (will also retrieve the client's info)
-            client = Client(connection, address[0])
+            client = Client(connection, address)
 
             # get the client's info
             client.get_data()
@@ -200,7 +191,6 @@ class Manager:
                     del self.__client_pool[self.__client_pool.index(check_client)]
 
         # catch and exceptions within the general on_connect function
-        # noinspection PyBroadException
         try:
             # run the on_connect function for the client
             self.on_connect(client)
@@ -212,11 +202,10 @@ class Manager:
                 + str(error) + "'")
 
         # catch and exceptions within the device specific on_message function if any occur
-        # noinspection PyBroadException
         try:
             # check if the user provided a device specific handler for this client's device type, if so execute it
-            if client.data.type in self.__on_connect_handlers.keys():
-                self.__on_connect_handlers[client.data.type](client)
+            if client.data.type in self.__device_types.keys():
+                self.__device_types[client.data.type].on_connect(client)
 
         # in case of a exception when executing handler
         except Exception as error:
@@ -251,28 +240,53 @@ class Manager:
 
     # check the heartbeat of a client based on their given index
     def __heartbeat(self, client_index):
+        client = self.__client_pool[client_index]
 
         # logging output
-        self.logger.debug("(Heartbeat Checker for Client '" + self.__client_pool[client_index].data.uuid
+        self.logger.debug("(Heartbeat Checker for Client '" + client.data.uuid
                           + "') Initiating heartbeat check.")
 
         try:
             # check the heartbeat of the client
-            self.__client_pool[client_index].heartbeat()
+            client.heartbeat()
 
             # logging output
-            self.logger.debug("(Heartbeat Checker for Client '"
-                              + self.__client_pool[client_index].data.uuid + "') Client passed heartbeat check.")
+            self.logger.debug("(Heartbeat Checker for Client '" + client.data.uuid
+                              + "') Client passed heartbeat check.")
 
             return
         except Client.ConnectionEnd:
             try:
                 # end the client's connection
-                self.__client_pool[client_index].end()
+                client.end()
             finally:
                 # logging output
-                self.logger.error("(Heartbeat Checker for Client '" + self.__client_pool[client_index].data.uuid
+                self.logger.error("(Heartbeat Checker for Client '" + client.data.uuid
                                   + "') Client failed heartbeat check, removing from pool.")
+
+                # catch and exceptions within the general on_connect function
+                try:
+                    # run the on_connect function for the client
+                    self.on_disconnect(client)
+
+                # in case of a exception when executing handler
+                except Exception as error:
+                    self.logger.error(
+                        "(Message Handler) Exception caught when running the on_connect() handler. Exception: '"
+                        + str(error) + "'")
+
+                # catch and exceptions within the device specific on_message function if any occur
+                try:
+                    # check if the user provided a device specific handler for this client's device type
+                    # if so execute it
+                    if client.data.type in self.__device_types.keys():
+                        self.__device_types[client.data.type].on_disconnect(client)
+
+                # in case of a exception when executing handler
+                except Exception as error:
+                    self.logger.error(
+                        "(Message Handler) Exception caught when running the on_connect_" + client.data.type +
+                        "() handler." + "Exception: '" + str(error) + "'")
 
                 # delete the client from the pool
                 del self.__client_pool[client_index]
@@ -297,19 +311,22 @@ class Manager:
                     self.logger.debug("(Message Listener) Data received from client '" + client.data.uuid + "'."
                                       + " Sending data to appropriate handlers.")
 
+                    # create a message
+                    message = Message(client, Packet(data, sending=False))
+
                     # submit data to the __handle_message function
-                    self.__executor.submit(self.__handle_message(client, data))
+                    self.__executor.submit(self.__handle_message(message))
 
             # wait one second before trying to check messages again
             time.sleep(1)
 
     # function which is used to handle data sent from the client
-    def __handle_message(self, client, data):
+    def __handle_message(self, message: Message):
         # catch and exceptions within the general on_message function
         # noinspection PyBroadException
         try:
             # run the on_connect function for the client
-            self.on_message(client, data)
+            self.on_message(message)
 
         # in case of a exception when executing handler
         except Exception as error:
@@ -320,14 +337,14 @@ class Manager:
         # noinspection PyBroadException
         try:
             # check if the user provided a device specific handler for this client's device type, if so execute it
-            if client.data.type in self.__on_message_handlers.keys():
-                self.__on_message_handlers[client.data.type](client, data)
+            if message.client.data.type in self.__device_types.keys():
+                self.__device_types[message.client.data.type].on_message(message)
 
         # in case of a exception when executing handler
         except Exception as error:
             self.logger.error(
-                "(Message Handler) Exception caught when running the on_message_" + client.data.type + "() handler."
-                + "Exception: '" + str(error) + "'")
+                "(Message Handler) Exception caught when running the on_message() handler for DeviceType '" +
+                message.client.data.type + "." + "Exception: '" + str(error) + "'")
 
     # sends data to all clients
     def send_all(self, data):
@@ -337,48 +354,22 @@ class Manager:
             self.__executor.submit(client.send, data)
 
     # sends data to all clients of a specified device_type
-    def send_type(self, device_type, data):
+    def send_type(self, device_type, packet: Packet):
         # for each client in the pool
         for client in self.__client_pool:
             # check if the client matches the provided type
             if client.data.type == device_type:
                 # send the client the data
-                self.__executor.submit(client.send, data)
+                self.__executor.submit(client.send, packet)
 
     # sends data to a client given a uuid
-    def send(self, unique_id, data):
+    def send(self, unique_id, packet: Packet):
         # for each client in the pool
         for client in self.__client_pool:
             # check if the client matches the provided uuid
             if client.data.uuid == unique_id:
                 # send the client the data
-                self.__executor.submit(client.send, data)
-                return
-
-    # sends a string to all clients
-    def send_all_string(self, string):
-        # for each client in the pool
-        for client in self.__client_pool:
-            # send the client the string
-            self.__executor.submit(client.send_string, string)
-
-    # sends a string to all clients of a specified device_type
-    def send_type_string(self, device_type, string):
-        # for each client in the pool
-        for client in self.__client_pool:
-            # check if the client matches the provided type
-            if client.data.type == device_type:
-                # send the client the string
-                self.__executor.submit(client.send_string, string)
-
-    # sends a string to a client given a uuid
-    def send_string(self, unique_id, string):
-        # for each client in the pool
-        for client in self.__client_pool:
-            # check if the client matches the provided uuid
-            if client.data.uuid == unique_id:
-                # send the client the string
-                self.__executor.submit(client.send_string, string)
+                self.__executor.submit(client.send, packet)
                 return
 
     # returns an list of dictionaries storing the connected clients' information
@@ -405,56 +396,29 @@ class Manager:
             setattr(self, coroutine.__name__, coroutine)
             return True
 
-        # handle device specific on_connect handlers
-        elif "on_connect_" in coroutine.__name__:
-            # get the type of the device this handler is for
-            device_type = coroutine.__name__.replace("on_connect_", "")
+    # used to add a device to the manager
+    def add_device(self, device: Device):
+        # ensure the device is of type Device
+        if not isinstance(device, Device):
+            self.logger.error("(Device Adder) Failed to add device to the manager due to invalid typing.")
+            return
 
-            # ensure the type of device the handler matches has been registered
-            if device_type in self.__valid_types:
-                # logging output
-                self.logger.info("(Event Handler) '" + coroutine.__name__ + "' handler was added successfully.")
+        # add the device to the list of device types
+        self.__device_types.update({device.type: device})
 
-                # add the device specific handler to the list of on_message handlers
-                self.__on_connect_handlers.update({device_type: coroutine})
-                return True
-
-            # in case the type is not a valid device type
-            self.logger.error("(Event Handler) '" + coroutine.__name__ + "' is not a valid event handler and will"
-                              + " be ignored. Please refer to the event handler documentation.")
-            return False
-
-        # handle device specific on_message handlers
-        elif "on_message_" in coroutine.__name__:
-            # get the type of the device this handler is for
-            device_type = coroutine.__name__.replace("on_message_", "")
-
-            # ensure the type of device the handler matches has been registered
-            if device_type in self.__valid_types:
-                # logging output
-                self.logger.info("(Event Handler) '" + coroutine.__name__ + "' handler was added successfully.")
-
-                # add the device specific handler to the list of on_message handlers
-                self.__on_message_handlers.update({device_type: coroutine})
-                return True
-
-            # in case the type is not a valid device type
-            self.logger.error("(Event Handler) '" + coroutine.__name__ + "' is not a valid event handler and will"
-                              + " be ignored. Please refer to the event handler documentation.")
-            return False
-
-        # in case of an invalid event handler provided
-        else:
-            self.logger.error("(Event Handler) '" + coroutine.__name__ + "' is not a valid event handler and will"
-                              + " be ignored. Please refer to the event handler documentation.")
-            return False
+        # logging output
+        self.logger.debug("(Device Adder) Successfully added DeviceType '" + device.type + "' to the manager.")
 
     # on connection function - run on client connection
-    def on_connect(self, client):
+    def on_connect(self, client: Client):
         return
 
     # on message function - runs when a client sends a message to the server
-    def on_message(self, client, message):
+    def on_message(self, message: Message):
+        return
+
+    # on disconnect function - runs when the client disconnects from the server
+    def on_disconnect(self, client: Client):
         return
 
     # runs all the handlers
