@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>IoT Light Manager</title>
+    </head>
+    <body>
+        <h1>Connected Devices:</h1>
+        <hr color="black">
+        <ul>
+            {% for client in data %}
+                <li><b>{{ client.data.name }}</b>
+                    <ul>
+                        <li>
+                            <form method="post">
+                                <input type="text" name="command" value="" />
+                                <input type="hidden" name="uuid" value="{{ client.uuid }}" />
+                                <input type="submit" value="Send Command" />
+                            </form>
+                        </li>
+                    </ul>
+                </li>
+            {% endfor %}
+        </ul>
+        <hr color="black">
+        <h3>Communicate to Every Client</h3>
+        <ul>
+            <li>
+                <form method="post">
+                    <input type="text" name="command_all" value="" />
+                    <input type="submit" value="Send Custom Command to All Devices" />
+                </form>
+            </li>
+        </ul>
+    </body>
+</html>
