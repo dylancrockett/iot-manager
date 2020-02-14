@@ -3,7 +3,7 @@ from .Message import Message
 
 
 # defines a device type
-class Device:
+class DeviceType:
     def __init__(self, device_type):
         self.type = device_type
 

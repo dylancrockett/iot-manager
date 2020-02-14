@@ -4,13 +4,14 @@ import socket
 import threading
 import ssl
 import time
+from typing import Type, TypeVar, Generic
 from concurrent.futures import ThreadPoolExecutor
 
 # module imports
 from .Client import Client
 from .Packet import Packet
 from .Message import Message
-from .Device import Device
+from .DeviceType import DeviceType
 
 
 # Manager class
@@ -122,10 +123,7 @@ class Manager:
         self.__executor = ThreadPoolExecutor(max_workers=max_workers)
 
         # a list used to store threads which last the lifetime of the program
-        self.__thread_pool = []
-
-        # start all of the main threads the class uses to run
-        self.__thread_handler()
+        self.__background_threads = []
         return
 
     # run on a thread and is what connects new devices to the manager
@@ -397,11 +395,14 @@ class Manager:
             return True
 
     # used to add a device to the manager
-    def add_device(self, device: Device):
-        # ensure the device is of type Device
-        if not isinstance(device, Device):
-            self.logger.error("(Device Adder) Failed to add device to the manager due to invalid typing.")
-            return
+    def add_device(self, device: DeviceType):
+        # ensure the device is of type DeviceType
+        if not isinstance(device, DeviceType):
+            raise ValueError("device is not of type DeviceType")
+
+        # ensure device.type is of type str
+        if not isinstance(device.type, str):
+            raise ValueError("device.type is not of type str")
 
         # add the device to the list of device types
         self.__device_types.update({device.type: device})
@@ -427,17 +428,22 @@ class Manager:
         self.logger.info("(Thread Handler) Adding threads to the thread pool.")
 
         # add the core threads to the pool
-        self.__thread_pool.append(threading.Thread(target=self.__connection_listener, daemon=False))
-        self.__thread_pool.append(threading.Thread(target=self.__heartbeat_checker, daemon=False))
-        self.__thread_pool.append(threading.Thread(target=self.__message_listener, daemon=False))
+        self.__background_threads.append(threading.Thread(target=self.__connection_listener, daemon=False))
+        self.__background_threads.append(threading.Thread(target=self.__heartbeat_checker, daemon=False))
+        self.__background_threads.append(threading.Thread(target=self.__message_listener, daemon=False))
 
         # logging output
         self.logger.info("(Thread Handler) Starting threads.")
 
         # start the threads in the pool
-        for thread in self.__thread_pool:
+        for thread in self.__background_threads:
             thread.start()
 
         # logging output
         self.logger.info("(Thread Handler) All threads started.")
         return
+
+    # starts all of the necessary permanent background threads
+    def start(self):
+        # start all of the background threads
+        self.__thread_handler()

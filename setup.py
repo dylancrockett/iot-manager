@@ -5,8 +5,8 @@ with open("README.md", "r") as fh:
 
 setup(
     name="iot-manager",
-    version="0.0.5",
-    packages=["iot-manager"],
+    version="0.0.6",
+    packages=["iot_manager"],
     author="Dylan Crockett",
     author_email="dylanrcrockett@gmail.com",
     description="A management API for connecting and managing Clients via TCP Sockets",
