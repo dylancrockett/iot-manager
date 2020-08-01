@@ -1,14 +1,16 @@
 from setuptools import setup
+import iot_manager
 
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
 setup(
     name="iot-manager",
-    version="0.0.7",
+    version=iot_manager.__version__,
     packages=["iot_manager"],
     author="Dylan Crockett",
     author_email="dylanrcrockett@gmail.com",
+    license="MIT",
     description="A management API for connecting and managing Clients via TCP Sockets",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -22,5 +24,8 @@ setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent"
     ],
-    python_requires='>=3.8'
+    install_requires=[
+        'gevent',
+    ],
+    python_requires='>=3.7'
 )
