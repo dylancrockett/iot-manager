@@ -1,6 +1,10 @@
 # ignore editor files
 .idea
 
+# ignore scripts
+local_build.bat
+upload.bat
+
 #
 # Default Python Gitignore
 #
